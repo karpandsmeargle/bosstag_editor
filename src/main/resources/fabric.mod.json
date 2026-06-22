@@ -1,0 +1,28 @@
+{
+	"schemaVersion": 1,
+	"id": "bosstag_editor",
+	"version": "${version}",
+	"name": "bosstag_editor",
+	"description": "Monumenta bosstag editing",
+	"authors": [
+		"karpandsmeargle"
+	],
+	"contact": {
+		"sources": "https://github.com/karpandsmeargle/bosstag_editor"
+	},
+	"license": "Apache-2.0",
+	"icon": "assets/bosstag_editor/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.karpandsmeargle.editor.client.Main"
+		]
+	},
+	"mixins": [],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~1.20.4",
+		"java": ">=17",
+		"fabric-api": "*"
+	}
+}
