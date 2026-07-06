@@ -202,10 +202,9 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
             .excludeFieldsWithModifiers(Modifier.TRANSIENT)
             .create();
 
-    // TODO: Consider adding deprecated field
-    public record BosstagInfo(String name, @Nullable String description) {}
+    public record BosstagInfo(String name, @Nullable String description, boolean deprecated) {}
 
-    public record ParameterInfo(String name, String type, @Nullable String description) {}
+    public record ParameterInfo(String name, String type, @Nullable String description, boolean deprecated) {}
 
     // Client to Server
     private sealed interface RequestPacket {
