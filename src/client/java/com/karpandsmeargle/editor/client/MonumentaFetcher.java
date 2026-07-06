@@ -10,7 +10,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
-import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
@@ -19,40 +18,92 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler {
     private static final Identifier CHANNEL_ID = new Identifier("monumenta:bosstag_editor");
     private final Map<String, CompletableFuture<ResponsePacket>> awaitingResponses = new HashMap<>();
+    private static final long TIMEOUT_MS = 5000;
+
+    public static class RequestFailException extends RuntimeException {
+        public static final String NOT_CONNECTED = "Attempted to send request while not connected to a Monumenta server";
+        public static final String PACKET_MISMATCH = "Response packet does not match request";
+        public static final String NO_BOS_MAINHAND = "No book of souls held in mainhand";
+
+        private final String cause;
+        private final String type;
+        private final String messageId;
+        public RequestFailException(String cause, String type, String messageId) {
+            super(cause + "; request type: " + type + ", id: " + messageId);
+            this.cause = cause;
+            this.type = type;
+            this.messageId = messageId;
+        }
+
+        public String reason() {
+            return cause + "; request type: " + type + ", id: " + messageId;
+        }
+    }
 
     public MonumentaFetcher() {
         ClientPlayNetworking.registerGlobalReceiver(CHANNEL_ID, this);
     }
 
-    private void sendAsJson(RequestPacket packet) {
-        PacketByteBuf buf = PacketByteBufs.create();
-        buf.writeBytes(GSON.toJson(packet).getBytes(StandardCharsets.UTF_8));
-        ClientPlayNetworking.send(CHANNEL_ID, buf);
+    private CompletableFuture<ResponsePacket> request(RequestPacket request, String type) {
+        String messageId = request.messageId();
+
+        Main.LOGGER.info("Sending request; request type: {}, id: {}", type, messageId);
+
+        // Not completely foolproof, since you can log off Monumenta after this check,
+        // but is just an early check for the common case.
+        if (isNotOnMonumenta(MinecraftClient.getInstance())) {
+            var connectFailException = new RequestFailException(RequestFailException.NOT_CONNECTED, type, messageId);
+            Main.LOGGER.error(connectFailException.reason());
+            return CompletableFuture.failedFuture(connectFailException);
+        }
+
+        CompletableFuture<ResponsePacket> responseFuture = new CompletableFuture<>();
+        synchronized (awaitingResponses) {
+            // whenComplete inside to guarantee that remove will always run after
+            awaitingResponses.put(messageId, responseFuture);
+            responseFuture
+                .orTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((_r, _t) -> {
+                    synchronized(awaitingResponses) {
+                        awaitingResponses.remove(messageId);
+                    }
+                });
+        }
+
+        try {
+            PacketByteBuf buf = PacketByteBufs.create();
+            buf.writeBytes(GSON.toJson(request).getBytes(StandardCharsets.UTF_8));
+            ClientPlayNetworking.send(CHANNEL_ID, buf);
+        } catch (IllegalStateException e) {
+            var connectFailException = new RequestFailException(RequestFailException.NOT_CONNECTED, type, messageId);
+            Main.LOGGER.error(connectFailException.reason());
+            responseFuture.completeExceptionally(connectFailException);
+        }
+
+        return responseFuture;
     }
 
     public CompletableFuture<Void> requestEditorToMainhand(Map<String, Map<String, String>> tagList) {
         String messageId = UUID.randomUUID().toString();
 
-        Main.LOGGER.info("Sending request for editor to mainhand with id {}", messageId);
-
-        CompletableFuture<ResponsePacket> responseFuture = new CompletableFuture<>();
-        awaitingResponses.put(messageId, responseFuture);
-
-        sendAsJson(new RequestEditorToMainhandPacket(messageId, tagList));
+        var responseFuture = request(new RequestEditorToMainhandPacket(messageId, tagList), RequestEditorToMainhandPacket.TYPE);
 
         return responseFuture.thenAccept(responsePacket -> {
             if (responsePacket instanceof ResponseEditorToMainhandPacket responseEditorToMainhandPacket) {
                 if (!responseEditorToMainhandPacket.success) {
-                    Main.LOGGER.error("Server rejected editor to mainhand request for id {}", messageId);
-                    throw new RuntimeException("Server rejected editor to mainhand request for id " + messageId);
+                    var rfe = new RequestFailException(RequestFailException.NO_BOS_MAINHAND, RequestEditorToMainhandPacket.TYPE, messageId);
+                    Main.LOGGER.error(rfe.reason());
+                    throw rfe;
                 }
             } else {
-                Main.LOGGER.error("Received wrong packet type from server for id {}; expected ResponseEditorToMainhand", messageId);
-                throw new RuntimeException("Received wrong packet type from server for id " + messageId + "; expected ResponseEditorToMainhand");
+                var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestEditorToMainhandPacket.TYPE, messageId);
+                Main.LOGGER.error(rfe.reason());
+                throw rfe;
             }
         });
     }
@@ -60,23 +111,20 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     public CompletableFuture<Map<String, Map<String, String>>> requestMainhandToEditor() {
         String messageId = UUID.randomUUID().toString();
 
-        Main.LOGGER.info("Sending request for mainhand to editor with id {}", messageId);
-
-        CompletableFuture<ResponsePacket> responseFuture = new CompletableFuture<>();
-        awaitingResponses.put(messageId, responseFuture);
-
-        sendAsJson(new RequestMainhandToEditorPacket(messageId));
+        var responseFuture = request(new RequestMainhandToEditorPacket(messageId), RequestMainhandToEditorPacket.TYPE);
 
         return responseFuture.thenApply(responsePacket -> {
             if (responsePacket instanceof ResponseMainhandToEditorPacket responseMainhandToEditorPacket) {
                 if (responseMainhandToEditorPacket.tagList == null) {
-                    Main.LOGGER.error("Server rejected mainhand to editor request for id {}", messageId);
-                    throw new RuntimeException("Server rejected mainhand to editor request for id " + messageId);
+                    var rfe = new RequestFailException(RequestFailException.NO_BOS_MAINHAND, RequestMainhandToEditorPacket.TYPE, messageId);
+                    Main.LOGGER.error(rfe.reason());
+                    throw rfe;
                 }
                 return responseMainhandToEditorPacket.tagList;
             } else {
-                Main.LOGGER.error("Received wrong packet type from server for id {}; expected ResponseMainhandToEditor", messageId);
-                throw new RuntimeException("Received wrong packet type from server for id " + messageId + "; expected ResponseMainhandToEditor");
+                var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestMainhandToEditorPacket.TYPE, messageId);
+                Main.LOGGER.error(rfe.reason());
+                throw rfe;
             }
         });
     }
@@ -84,19 +132,15 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     public CompletableFuture<Map<BosstagInfo, List<ParameterInfo>>> requestAllInfo() {
         String messageId = UUID.randomUUID().toString();
 
-        Main.LOGGER.info("Sending request for all info with id {}", messageId);
-
-        CompletableFuture<ResponsePacket> responseFuture = new CompletableFuture<>();
-        awaitingResponses.put(messageId, responseFuture);
-
-        sendAsJson(new RequestAllInfoPacket(messageId));
+        var responseFuture = request(new RequestAllInfoPacket(messageId), RequestAllInfoPacket.TYPE);
 
         return responseFuture.thenApply(responsePacket -> {
             if (responsePacket instanceof ResponseAllInfoPacket responseAllInfoPacket) {
                 return responseAllInfoPacket.params;
             } else {
-                Main.LOGGER.error("Received wrong packet type from server for id {}; expected ResponseAllInfo", messageId);
-                throw new RuntimeException("Received wrong packet type from server for id " + messageId + "; expected ResponseAllInfo");
+                var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestAllInfoPacket.TYPE, messageId);
+                Main.LOGGER.error(rfe.reason());
+                throw rfe;
             }
         });
     }
@@ -108,6 +152,11 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         PacketByteBuf buf,
         PacketSender responseSender
     ) {
+        if (isNotOnMonumenta(client)) {
+            Main.LOGGER.warn("Received a packet while not on Monumenta");
+            return;
+        }
+
         String encodedMessage = buf.readCharSequence(buf.readableBytes(), StandardCharsets.UTF_8).toString();
         String type =
             JsonParser.parseString(encodedMessage)
@@ -120,7 +169,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
             case ResponseMainhandToEditorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorPacket.class);
             case ResponseAllInfoPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoPacket.class);
             default -> {
-                Main.LOGGER.log(Level.WARN, "Unknown packet type: {}", type);
+                Main.LOGGER.warn("Unknown packet type: {}", type);
                 yield null;
             }
         };
@@ -134,9 +183,15 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
                 awaitingResponses.get(packet.messageId()).complete(packet);
                 awaitingResponses.remove(packet.messageId());
             } else {
-                Main.LOGGER.log(Level.ERROR, "Response packet type {} with id {} arrived, but couldn't find a corresponding outstanding request", type, packet.messageId());
+                Main.LOGGER.error("Response packet type {} with id {} arrived, but couldn't find a corresponding outstanding request", type, packet.messageId());
             }
         }
+    }
+
+    public boolean isNotOnMonumenta(MinecraftClient client) {
+        return client.isInSingleplayer()
+            || client.getCurrentServerEntry() == null
+            || !client.getCurrentServerEntry().address.toLowerCase().endsWith(".playmonumenta.com");
     }
 
     /* Replicated exactly between mod and here */
@@ -153,7 +208,9 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     public record ParameterInfo(String name, String type, @Nullable String description) {}
 
     // Client to Server
-    private sealed interface RequestPacket {}
+    private sealed interface RequestPacket {
+        String messageId();
+    }
     @SuppressWarnings("unused")
     private record RequestEditorToMainhandPacket(String messageId, Map<String, Map<String, String>> tagList) implements RequestPacket {
         private static final String TYPE = "RequestEditorToMainhand";
