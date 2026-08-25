@@ -29,7 +29,11 @@ To allow for Monumenta developers to modify bosstags locally, inside their edito
 
 ## Architecture
 The fundamental source of truth for the list of tags, parameters and their
-possible values is the Monumenta plugin on the mobs shard (server). One design
+possible values is the Monumenta plugin on the mobs shard. Plugin
+developers deploy from their local development environments directly to
+these test shards, and these deployments may include tag changes. 
+
+One design
 question, then, is how to get that information from the plugin to the
 developer's computer. Additionally, for the sake of fast iteration, developers
 should be able to generate testable books from their local environment, which
