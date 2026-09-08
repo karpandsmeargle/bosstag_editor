@@ -25,10 +25,11 @@ public class Commands {
                                 Main.LOGGER.error("Failed to fetch tag information.");
                                 MinecraftClient.getInstance().execute(() -> context.getSource().sendError(Text.literal("Failed to fetch tag information.")));
                                 
-                                Main.LOGGER.error(ex);
                                 if (ex instanceof RequestFailException rfe) {
+                                    Main.LOGGER.error(rfe.reason());
                                     MinecraftClient.getInstance().execute(() -> context.getSource().sendError(Text.literal(rfe.reason())));
                                 } else {
+                                    Main.LOGGER.error(ex);
                                     MinecraftClient.getInstance().execute(() -> context.getSource().sendError(Text.literal("Check your client logs for an exception stack trace.")));
                                 }
 
