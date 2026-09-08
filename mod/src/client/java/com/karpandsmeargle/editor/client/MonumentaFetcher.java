@@ -180,7 +180,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
 
         synchronized (awaitingResponses) {
             if (awaitingResponses.containsKey(packet.messageId())) {
-                awaitingResponses.get(packet.messageId()).complete(packet);
+                awaitingResponses.get(packet.messageId()).completeAsync(() -> packet);
                 awaitingResponses.remove(packet.messageId());
             } else {
                 Main.LOGGER.error("Response packet type {} with id {} arrived, but couldn't find a corresponding outstanding request", type, packet.messageId());
