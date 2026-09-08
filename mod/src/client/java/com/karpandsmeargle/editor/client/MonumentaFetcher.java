@@ -129,20 +129,26 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         });
     }
 
+    private CompletableFuture<Map<BosstagInfo, List<ParameterInfo>>> processAllInfo(String messageId, ResponsePacket responsePacket) {
+        if (responsePacket instanceof ResponseAllInfoPacket responseAllInfoPacket) {
+            if (!responseAllInfoPacket.hasMoreTags) {
+                return CompletableFuture.completedFuture(responseAllInfoPacket.params);
+            }
+            // Server shall have sole responsibility for tracking pagination progress for a particular message id
+            var subResponseFuture = request(new RequestAllInfoPacket(messageId), RequestAllInfoPacket.TYPE);
+            return subResponseFuture.thenCompose(subResponsePacket -> processAllInfo(messageId, subResponsePacket));
+        } else {
+            var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestAllInfoPacket.TYPE, messageId);
+            Main.LOGGER.error(rfe.reason());
+            throw rfe;
+        }
+    }
+
     public CompletableFuture<Map<BosstagInfo, List<ParameterInfo>>> requestAllInfo() {
         String messageId = UUID.randomUUID().toString();
 
         var responseFuture = request(new RequestAllInfoPacket(messageId), RequestAllInfoPacket.TYPE);
-
-        return responseFuture.thenApply(responsePacket -> {
-            if (responsePacket instanceof ResponseAllInfoPacket responseAllInfoPacket) {
-                return responseAllInfoPacket.params;
-            } else {
-                var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestAllInfoPacket.TYPE, messageId);
-                Main.LOGGER.error(rfe.reason());
-                throw rfe;
-            }
-        });
+        return responseFuture.thenCompose(responsePacket -> processAllInfo(messageId, responsePacket));
     }
 
     @Override
@@ -241,7 +247,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     }
 
     @SuppressWarnings("unused")
-    private record ResponseAllInfoPacket(String messageId, Map<BosstagInfo, List<ParameterInfo>> params) implements ResponsePacket {
+    private record ResponseAllInfoPacket(String messageId, Map<BosstagInfo, List<ParameterInfo>> params, boolean hasMoreTags) implements ResponsePacket {
         private static final String TYPE = "ResponseAllInfo";
     }
 }
