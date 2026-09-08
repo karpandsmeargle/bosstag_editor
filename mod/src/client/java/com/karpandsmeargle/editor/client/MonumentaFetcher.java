@@ -191,7 +191,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     public boolean isNotOnMonumenta(MinecraftClient client) {
         return client.isInSingleplayer()
             || client.getCurrentServerEntry() == null
-            || !client.getCurrentServerEntry().address.toLowerCase().endsWith(".playmonumenta.com");
+            || !client.getCurrentServerEntry().address.split(":")[0].toLowerCase().endsWith(".playmonumenta.com");
     }
 
     /* Replicated exactly between mod and here */
