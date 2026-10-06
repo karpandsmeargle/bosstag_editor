@@ -188,29 +188,30 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         Main.LOGGER.info("Received message to parse: {}", encodedMessage);
 
         String type;
+        ResponsePacket packet;
         try {
             type =
                 JsonParser.parseString(encodedMessage)
                     .getAsJsonObject()
                     .get("TYPE")
                     .getAsString();
+
+            packet = switch (type) {
+                case ResponseEditorToMainhandPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandPacket.class);
+                case ResponseMainhandToEditorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorPacket.class);
+                case ResponseAllInfoPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoPacket.class);
+                case ResponseEditorToMainhandErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandErrorPacket.class);
+                case ResponseMainhandToEditorErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorErrorPacket.class);
+                case ResponseAllInfoErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoErrorPacket.class);
+                default -> {
+                    Main.LOGGER.warn("Unknown packet type: {}", type);
+                    yield null;
+                }
+            };
         } catch (RuntimeException e) {
             Main.LOGGER.error("Failed to parse incoming packet: {}", encodedMessage, e);
             return;
         }
-
-        ResponsePacket packet = switch (type) {
-            case ResponseEditorToMainhandPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandPacket.class);
-            case ResponseMainhandToEditorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorPacket.class);
-            case ResponseAllInfoPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoPacket.class);
-            case ResponseEditorToMainhandErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandErrorPacket.class);
-            case ResponseMainhandToEditorErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorErrorPacket.class);
-            case ResponseAllInfoErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoErrorPacket.class);
-            default -> {
-                Main.LOGGER.warn("Unknown packet type: {}", type);
-                yield null;
-            }
-        };
 
         if (packet == null) {
             return;
