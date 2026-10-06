@@ -187,11 +187,17 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         String encodedMessage = buf.readCharSequence(buf.readableBytes(), StandardCharsets.UTF_8).toString();
         Main.LOGGER.info("Received message to parse: {}", encodedMessage);
 
-        String type =
-            JsonParser.parseString(encodedMessage)
-                .getAsJsonObject()
-                .get("TYPE")
-                .getAsString();
+        String type;
+        try {
+            type =
+                JsonParser.parseString(encodedMessage)
+                    .getAsJsonObject()
+                    .get("TYPE")
+                    .getAsString();
+        } catch (RuntimeException e) {
+            Main.LOGGER.error("Failed to parse incoming packet: {}", encodedMessage, e);
+            return;
+        }
 
         ResponsePacket packet = switch (type) {
             case ResponseEditorToMainhandPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandPacket.class);
