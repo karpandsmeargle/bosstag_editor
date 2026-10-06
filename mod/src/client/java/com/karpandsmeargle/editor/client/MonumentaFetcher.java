@@ -101,7 +101,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
                 return;
             } else if (responsePacket instanceof ResponseEditorToMainhandErrorPacket errorPacket) {
                 String reason = switch (errorPacket.errorReason()) {
-                    case INVALID_BOOK_OF_SOULS -> RequestFailException.NO_BOS_MAINHAND;
+                    case NO_BOS_MAINHAND -> RequestFailException.NO_BOS_MAINHAND;
                     case GENERAL -> RequestFailException.GENERAL;
                 };
                 var rfe = new RequestFailException(reason, RequestEditorToMainhandPacket.TYPE, messageId);
@@ -125,7 +125,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
                 return responseMainhandToEditorPacket.tagList;
             } else if (responsePacket instanceof ResponseMainhandToEditorErrorPacket errorPacket) {
                 String reason = switch (errorPacket.errorReason()) {
-                    case INVALID_BOOK_OF_SOULS -> RequestFailException.NO_BOS_MAINHAND;
+                    case NO_BOS_MAINHAND -> RequestFailException.NO_BOS_MAINHAND;
                     case GENERAL -> RequestFailException.GENERAL;
                 };
                 var rfe = new RequestFailException(reason, RequestMainhandToEditorPacket.TYPE, messageId);
@@ -265,12 +265,12 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     }
 
     private enum EditorToMainhandErrorReason {
-        INVALID_BOOK_OF_SOULS,
+        NO_BOS_MAINHAND,
         GENERAL
     }
 
     private enum MainhandToEditorErrorReason {
-        INVALID_BOOK_OF_SOULS,
+        NO_BOS_MAINHAND,
         GENERAL
     }
 
