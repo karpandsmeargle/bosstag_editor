@@ -44,7 +44,7 @@ public class Commands {
                                         .sendFeedback(Text.literal(
                                             "[" + entry.getKey().name() + "] "
                                             + entry.getKey().description()
-                                            + (entry.getKey().deprecated() ? "" : " (DEPRECATED)")
+                                            + (entry.getKey().deprecated() ? " (DEPRECATED)" : "")
                                         )));
                                 for (var param : entry.getValue()) {
                                     MinecraftClient.getInstance().execute(() ->
@@ -52,7 +52,7 @@ public class Commands {
                                             .sendFeedback(Text.literal(
                                                 "- " + param.name() + " (" + param.type() + "): "
                                                 + param.description()
-                                                + (param.deprecated() ? "" : " (DEPRECATED)")
+                                                + (param.deprecated() ? " (DEPRECATED)" : "")
                                             )));
                                 }
                             }
