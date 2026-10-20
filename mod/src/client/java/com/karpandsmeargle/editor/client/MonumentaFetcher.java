@@ -29,6 +29,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         public static final String NOT_CONNECTED = "Attempted to send request while not connected to a Monumenta server";
         public static final String PACKET_MISMATCH = "Response packet does not match request";
         public static final String NO_BOS_MAINHAND = "No book of souls held in mainhand";
+        public static final String PARSE_FAILED = "Failed to parse mainhand book of souls";
         public static final String GENERAL = "Unknown failure; check mob shard logs";
 
         private final String cause;
@@ -126,6 +127,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
             } else if (responsePacket instanceof ResponseMainhandToEditorErrorPacket errorPacket) {
                 String reason = switch (errorPacket.errorReason()) {
                     case NO_BOS_MAINHAND -> RequestFailException.NO_BOS_MAINHAND;
+                    case PARSE_FAILED -> RequestFailException.PARSE_FAILED;
                     case GENERAL -> RequestFailException.GENERAL;
                 };
                 var rfe = new RequestFailException(reason, RequestMainhandToEditorPacket.TYPE, messageId);
