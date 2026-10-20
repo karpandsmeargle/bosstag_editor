@@ -278,6 +278,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
 
     private enum MainhandToEditorErrorReason {
         NO_BOS_MAINHAND,
+        PARSE_FAILED,
         GENERAL
     }
 
