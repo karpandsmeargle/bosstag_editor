@@ -37,6 +37,13 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// gRPC
+	def grpcVersion = project.grpc_version
+	include implementation("io.grpc:grpc-netty-shaded:${grpcVersion}")
+	include implementation("io.grpc:grpc-protobuf:${grpcVersion}")
+	include implementation("io.grpc:grpc-stub:${grpcVersion}")
+	compileOnly "org.apache.tomcat:annotations-api:6.0.53"
 }
 
 processResources {
