@@ -29,6 +29,8 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         public static final String NOT_CONNECTED = "Attempted to send request while not connected to a Monumenta server";
         public static final String PACKET_MISMATCH = "Response packet does not match request";
         public static final String NO_BOS_MAINHAND = "No book of souls held in mainhand";
+        public static final String PARSE_FAILED = "Failed to parse mainhand book of souls";
+        public static final String GENERAL = "Unknown failure; check mob shard logs";
 
         private final String cause;
         private final String type;
@@ -68,9 +70,11 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
             awaitingResponses.put(messageId, responseFuture);
             responseFuture
                 .orTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .whenComplete((_r, _t) -> {
-                    synchronized(awaitingResponses) {
-                        awaitingResponses.remove(messageId);
+                .whenComplete((_r, throwable) -> {
+                    if (throwable != null) {
+                        synchronized(awaitingResponses) {
+                            awaitingResponses.remove(messageId);
+                        }
                     }
                 });
         }
@@ -94,12 +98,16 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         var responseFuture = request(new RequestEditorToMainhandPacket(messageId, tagList), RequestEditorToMainhandPacket.TYPE);
 
         return responseFuture.thenAccept(responsePacket -> {
-            if (responsePacket instanceof ResponseEditorToMainhandPacket responseEditorToMainhandPacket) {
-                if (!responseEditorToMainhandPacket.success) {
-                    var rfe = new RequestFailException(RequestFailException.NO_BOS_MAINHAND, RequestEditorToMainhandPacket.TYPE, messageId);
-                    Main.LOGGER.error(rfe.reason());
-                    throw rfe;
-                }
+            if (responsePacket instanceof ResponseEditorToMainhandPacket) {
+                return;
+            } else if (responsePacket instanceof ResponseEditorToMainhandErrorPacket errorPacket) {
+                String reason = switch (errorPacket.errorReason()) {
+                    case NO_BOS_MAINHAND -> RequestFailException.NO_BOS_MAINHAND;
+                    case GENERAL -> RequestFailException.GENERAL;
+                };
+                var rfe = new RequestFailException(reason, RequestEditorToMainhandPacket.TYPE, messageId);
+                Main.LOGGER.error(rfe.reason());
+                throw rfe;
             } else {
                 var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestEditorToMainhandPacket.TYPE, messageId);
                 Main.LOGGER.error(rfe.reason());
@@ -115,12 +123,16 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
 
         return responseFuture.thenApply(responsePacket -> {
             if (responsePacket instanceof ResponseMainhandToEditorPacket responseMainhandToEditorPacket) {
-                if (responseMainhandToEditorPacket.tagList == null) {
-                    var rfe = new RequestFailException(RequestFailException.NO_BOS_MAINHAND, RequestMainhandToEditorPacket.TYPE, messageId);
-                    Main.LOGGER.error(rfe.reason());
-                    throw rfe;
-                }
                 return responseMainhandToEditorPacket.tagList;
+            } else if (responsePacket instanceof ResponseMainhandToEditorErrorPacket errorPacket) {
+                String reason = switch (errorPacket.errorReason()) {
+                    case NO_BOS_MAINHAND -> RequestFailException.NO_BOS_MAINHAND;
+                    case PARSE_FAILED -> RequestFailException.PARSE_FAILED;
+                    case GENERAL -> RequestFailException.GENERAL;
+                };
+                var rfe = new RequestFailException(reason, RequestMainhandToEditorPacket.TYPE, messageId);
+                Main.LOGGER.error(rfe.reason());
+                throw rfe;
             } else {
                 var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestMainhandToEditorPacket.TYPE, messageId);
                 Main.LOGGER.error(rfe.reason());
@@ -136,7 +148,18 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
             }
             // Server shall have sole responsibility for tracking pagination progress for a particular message id
             var subResponseFuture = request(new RequestAllInfoPacket(messageId), RequestAllInfoPacket.TYPE);
-            return subResponseFuture.thenCompose(subResponsePacket -> processAllInfo(messageId, subResponsePacket));
+            return subResponseFuture.thenCompose(subResponsePacket -> processAllInfo(messageId, subResponsePacket))
+                .thenApply(result -> {
+                    result.putAll(responseAllInfoPacket.params);
+                    return result;
+                });
+        } else if (responsePacket instanceof ResponseAllInfoErrorPacket errorPacket) {
+            String reason = switch (errorPacket.errorReason()) {
+                case GENERAL -> RequestFailException.GENERAL;
+            };
+            var rfe = new RequestFailException(reason, RequestAllInfoPacket.TYPE, messageId);
+            Main.LOGGER.error(rfe.reason());
+            throw rfe;
         } else {
             var rfe = new RequestFailException(RequestFailException.PACKET_MISMATCH, RequestAllInfoPacket.TYPE, messageId);
             Main.LOGGER.error(rfe.reason());
@@ -164,21 +187,33 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         }
 
         String encodedMessage = buf.readCharSequence(buf.readableBytes(), StandardCharsets.UTF_8).toString();
-        String type =
-            JsonParser.parseString(encodedMessage)
-                .getAsJsonObject()
-                .get("TYPE")
-                .getAsString();
+        Main.LOGGER.info("Received message to parse: {}", encodedMessage);
 
-        ResponsePacket packet = switch (type) {
-            case ResponseEditorToMainhandPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandPacket.class);
-            case ResponseMainhandToEditorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorPacket.class);
-            case ResponseAllInfoPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoPacket.class);
-            default -> {
-                Main.LOGGER.warn("Unknown packet type: {}", type);
-                yield null;
-            }
-        };
+        String type;
+        ResponsePacket packet;
+        try {
+            type =
+                JsonParser.parseString(encodedMessage)
+                    .getAsJsonObject()
+                    .get("TYPE")
+                    .getAsString();
+
+            packet = switch (type) {
+                case ResponseEditorToMainhandPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandPacket.class);
+                case ResponseMainhandToEditorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorPacket.class);
+                case ResponseAllInfoPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoPacket.class);
+                case ResponseEditorToMainhandErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseEditorToMainhandErrorPacket.class);
+                case ResponseMainhandToEditorErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseMainhandToEditorErrorPacket.class);
+                case ResponseAllInfoErrorPacket.TYPE -> GSON.fromJson(encodedMessage, ResponseAllInfoErrorPacket.class);
+                default -> {
+                    Main.LOGGER.warn("Unknown packet type: {}", type);
+                    yield null;
+                }
+            };
+        } catch (RuntimeException e) {
+            Main.LOGGER.error("Failed to parse incoming packet: {}", encodedMessage, e);
+            return;
+        }
 
         if (packet == null) {
             return;
@@ -186,8 +221,8 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
 
         synchronized (awaitingResponses) {
             if (awaitingResponses.containsKey(packet.messageId())) {
-                awaitingResponses.get(packet.messageId()).completeAsync(() -> packet);
-                awaitingResponses.remove(packet.messageId());
+                awaitingResponses.remove(packet.messageId())
+                    .completeAsync(() -> packet);
             } else {
                 Main.LOGGER.error("Response packet type {} with id {} arrived, but couldn't find a corresponding outstanding request", type, packet.messageId());
             }
@@ -196,8 +231,8 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
 
     public boolean isNotOnMonumenta(MinecraftClient client) {
         return client.isInSingleplayer()
-            || client.getCurrentServerEntry() == null
-            || !client.getCurrentServerEntry().address.split(":")[0].toLowerCase().endsWith(".playmonumenta.com");
+        || client.getCurrentServerEntry() == null
+        || !client.getCurrentServerEntry().address.split(":")[0].toLowerCase().endsWith(".playmonumenta.com");
     }
 
     /* Replicated exactly between mod and here */
@@ -206,6 +241,7 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
     private static final Gson GSON =
         new GsonBuilder()
             .excludeFieldsWithModifiers(Modifier.TRANSIENT)
+            .enableComplexMapKeySerialization()
             .create();
 
     public record BosstagInfo(String name, @Nullable String description, boolean deprecated) {}
@@ -236,18 +272,49 @@ public class MonumentaFetcher implements ClientPlayNetworking.PlayChannelHandler
         @SuppressWarnings("unused")
         String messageId();
     }
+
+    private enum EditorToMainhandErrorReason {
+        NO_BOS_MAINHAND,
+        GENERAL
+    }
+
+    private enum MainhandToEditorErrorReason {
+        NO_BOS_MAINHAND,
+        PARSE_FAILED,
+        GENERAL
+    }
+
+    private enum AllInfoErrorReason {
+        GENERAL
+    }
+
     @SuppressWarnings("unused")
-    private record ResponseEditorToMainhandPacket(String messageId, boolean success) implements ResponsePacket {
+    private record ResponseEditorToMainhandPacket(String messageId) implements ResponsePacket {
         private static final String TYPE = "ResponseEditorToMainhand";
     }
 
     @SuppressWarnings("unused")
-    private record ResponseMainhandToEditorPacket(String messageId, @Nullable Map<String, Map<String, String>> tagList) implements ResponsePacket {
+    private record ResponseMainhandToEditorPacket(String messageId, Map<String, Map<String, String>> tagList) implements ResponsePacket {
         private static final String TYPE = "ResponseMainhandToEditor";
     }
 
     @SuppressWarnings("unused")
     private record ResponseAllInfoPacket(String messageId, Map<BosstagInfo, List<ParameterInfo>> params, boolean hasMoreTags) implements ResponsePacket {
         private static final String TYPE = "ResponseAllInfo";
+    }
+
+    @SuppressWarnings("unused")
+    private record ResponseEditorToMainhandErrorPacket(String messageId, EditorToMainhandErrorReason errorReason) implements ResponsePacket {
+        private static final String TYPE = "ResponseEditorToMainhandError";
+    }
+
+    @SuppressWarnings("unused")
+    private record ResponseMainhandToEditorErrorPacket(String messageId, MainhandToEditorErrorReason errorReason) implements ResponsePacket {
+        private static final String TYPE = "ResponseMainhandToEditorError";
+    }
+
+    @SuppressWarnings("unused")
+    private record ResponseAllInfoErrorPacket(String messageId, AllInfoErrorReason errorReason) implements ResponsePacket {
+        private static final String TYPE = "ResponseAllInfoError";
     }
 }
